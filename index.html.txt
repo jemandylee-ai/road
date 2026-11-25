@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>안서동 QR 귀갓길 안심 보행 지도</title>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Pretendard', -apple-system, sans-serif; }
+    body { display: flex; flex-direction: column; height: 100vh; background: #0b1120; color: #f8fafc; overflow: hidden; }
+
+    header {
+      padding: 12px 14px;
+      background: #111827;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #1f2937;
+      z-index: 1000;
+    }
+    header h1 { font-size: 15px; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 7px; }
+
+    .btn-group { display: flex; gap: 6px; }
+    .btn {
+      padding: 6px 10px;
+      border-radius: 7px;
+      border: none;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-mode { background: #1e293b; color: #e2e8f0; border: 1px solid #334155; }
+    .btn-qr { background: #0284c7; color: #fff; }
+    .btn-sos { background: #ef4444; color: #fff; }
+
+    #map-wrap { position: relative; flex: 1; width: 100%; }
+    #map { width: 100%; height: 100%; }
+
+    /* API 키 없이 밤길 안심 지도 느낌을 내는 필터 */
+    .night-map .leaflet-tile-pane {
+      filter: invert(92%) hue-rotate(180deg) brightness(88%) contrast(108%) saturate(85%);
+    }
+
+    /* 범례 패널 */
+    .legend-card {
+      position: absolute;
+      bottom: 16px;
+      left: 12px;
+      background: rgba(15, 23, 42, 0.92);
+      border: 1px solid #334155;
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 11px;
+      z-index: 800;
+      backdrop-filter: blur(6px);
+      max-width: 240px;
+    }
+    .legend-title { font-weight: 700; margin-bottom: 6px; color: #e2e8f0; font-size: 12px; }
+    .legend-item { display: flex; align-items: center; gap: 7px; margin: 4px 0; color: #cbd5e1; }
+    .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+
+    /* 내 위치 버튼 */
+    .loc-btn {
+      position: absolute;
+      bottom: 16px;
+      right: 12px;
+      z-index: 800;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 1px solid #334155;
+      background: #0f172a;
+      color: #38bdf8;
+      font-size: 16px;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    }
+
+    /* 모달 */
+    .modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.72);
+      z-index: 2000;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-box {
+      background: #1e293b;
+      border: 1px solid #475569;
+      border-radius: 14px;
+      padding: 20px;
+      width: 88%;
+      max-width: 340px;
+      text-align: center;
+    }
+    .modal-box h3 { font-size: 16px; margin-bottom: 8px; }
+    .modal-box p { font-size: 12px; color: #94a3b8; line-height: 1.5; }
+    #qrcode {
+      display: flex;
+      justify-content: center;
+      background: #fff;
+      padding: 12px;
+      border-radius: 10px;
+      margin: 14px auto;
+      width: fit-content;
+    }
+
+    .leaflet-popup-content-wrapper { background: #1e293b; color: #f8fafc; border: 1px solid #475569; }
+    .leaflet-popup-tip { background: #1e293b; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1><i class="fa-solid fa-route"></i> 안서동 안심 보행 지도</h1>
+    <div class="btn-group">
+      <button class="btn btn-mode" onclick="toggleMapMode()"><i class="fa-solid fa-moon"></i> 밤길/주간</button>
+      <button class="btn btn-qr" onclick="openQR()"><i class="fa-solid fa-qrcode"></i> QR</button>
+      <button class="btn btn-sos" onclick="triggerSOS()"><i class="fa-solid fa-bell"></i> SOS</button>
+    </div>
+  </header>
+
+  <div id="map-wrap" class="night-map">
+    <div id="map"></div>
+
+    <div class="legend-card">
+      <div class="legend-title">안서동 귀갓길 상태 (백석대 · 700번 종점 · 천호지)</div>
+      <div class="legend-item"><span class="dot" style="background:#ef4444;"></span> 어두운 길 / 주의 구간</div>
+      <div class="legend-item"><span class="dot" style="background:#10b981;"></span> 밝은 조명 · 안전 거점</div>
+      <div class="legend-item"><span class="dot" style="background:#3b82f6;"></span> 24시 편의점 · 대피 지점</div>
+    </div>
+
+    <button class="loc-btn" title="내 위치 찾기" onclick="locateMe()">
+      <i class="fa-solid fa-location-crosshairs"></i>
+    </button>
+  </div>
+
+  <div id="qrModal" class="modal" onclick="closeQR()">
+    <div class="modal-box" onclick="event.stopPropagation()">
+      <h3>귀갓길 안심 지도 QR</h3>
+      <p>배포된 페이지 주소가 QR로 생성됩니다.<br>카메라로 스캔해 바로 열어보세요.</p>
+      <div id="qrcode"></div>
+      <button class="btn btn-qr" style="width:100%; justify-content:center;" onclick="closeQR()">닫기</button>
+    </div>
+  </div>
+
+  <script>
+    // 안서동(백석대 ~ 700번 종점 ~ 단국대/천호지 방면) 중심 좌표
+    const map = L.map('map').setView([36.8355, 127.1825], 16);
+
+    // API 키 불필요한 OpenStreetMap 타일
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+
+    // 어두운 길 / 안전 구역 데이터 (상명대 제외, 백석대·700번 종점·천호지 어두운 길 위주)
+    const spots = [
+      {
+        name: "700번 버스 종점 인근 어두운 골목",
+        category: "dark",
+        lat: 36.8362, lng: 127.1854,
+        light: "조명 상태: 어두움 (가로등 간격 넓음)",
+        info: "원룸 골목 진입로로 야간 시야 확보가 약한 구간"
+      },
+      {
+        name: "단국대 · 천호지 호수 방향 어두운 샛길",
+        category: "dark",
+        lat: 36.8315, lng: 127.1782,
+        light: "조명 상태: 어두움 (수목 그늘 및 저조도 구간)",
+        info: "호수 주변 산책로·접근로 중 밤에 어두워지는 길"
+      },
+      {
+        name: "안서동 주택가 이면도로 어두운 구간",
+        category: "dark",
+        lat: 36.8342, lng: 127.1812,
+        light: "조명 상태: 다소 어두움",
+        info: "큰길에서 안쪽으로 들어가는 좁은 골목 주의"
+      },
+      {
+        name: "백석대학교 정문 · 메인 도로변",
+        category: "safe",
+        lat: 36.8392, lng: 127.1858,
+        light: "조명 상태: 밝음 (가로등 및 보안등 양호)",
+        info: "차량·보행 통행이 비교적 유지되는 주요 이동 축"
+      },
+      {
+        name: "천호지 큰길 가로등 구간",
+        category: "safe",
+        lat: 36.8330, lng: 127.1805,
+        light: "조명 상태: 밝음",
+        info: "샛길 대신 큰길로 우회할 때 기준이 되는 구간"
+      },
+      {
+        name: "안서동 24시 편의점 거점",
+        category: "store",
+        lat: 36.8348, lng: 127.1838,
+        light: "조명 상태: 매우 밝음 (상시 점등)",
+        info: "야간 귀가 시 주변 밝은 조명 및 대기 공간 활용 가능"
+      }
+    ];
+
+    spots.forEach(spot => {
+      const color = spot.category === 'dark' ? '#ef4444' : (spot.category === 'safe' ? '#10b981' : '#3b82f6');
+      const badge = spot.category === 'dark' ? '어두운 길 주의' : (spot.category === 'safe' ? '조명 양호' : '24시 밝은 거점');
+
+      const marker = L.circleMarker([spot.lat, spot.lng], {
+        radius: 10,
+        fillColor: color,
+        color: '#ffffff',
+        weight: 2,
+        opacity: 1,
+        fillOpacity: 0.9
+      }).addTo(map);
+
+      marker.bindPopup(`
+        <div style="font-size:12.5px; line-height:1.5;">
+          <div style="font-weight:700; color:${color}; margin-bottom:3px;">[${badge}] ${spot.name}</div>
+          <div>${spot.light}</div>
+          <div style="color:#cbd5e1; margin-top:4px;">${spot.info}</div>
+        </div>
+      `);
+    });
+
+    // 어두운 길 구간을 시각적으로 표시하는 구역 원
+    L.circle([36.8362, 127.1854], { radius: 85, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.14, weight: 1 }).addTo(map);
+    L.circle([36.8315, 127.1782], { radius: 95, color: '#ef4444', fillColor: '#ef4444', fillOpacity: 0.14, weight: 1 }).addTo(map);
+
+    let myMarker = null;
+    function locateMe() {
+      if (!navigator.geolocation) {
+        alert("이 브라우저에서는 위치 기능을 지원하지 않습니다.");
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        pos => {
+          const { latitude, longitude } = pos.coords;
+          if (myMarker) map.removeLayer(myMarker);
+          myMarker = L.marker([latitude, longitude]).addTo(map).bindPopup("<b>현재 내 위치</b>").openPopup();
+          map.setView([latitude, longitude], 17);
+        },
+        () => {
+          alert("위치 권한을 허용하면 현재 위치가 지도에 표시됩니다.");
+        }
+      );
+    }
+
+    function toggleMapMode() {
+      document.getElementById('map-wrap').classList.toggle('night-map');
+    }
+
+    function openQR() {
+      const box = document.getElementById('qrcode');
+      box.innerHTML = "";
+      new QRCode(box, {
+        text: window.location.href,
+        width: 165,
+        height: 165
+      });
+      document.getElementById('qrModal').style.display = 'flex';
+    }
+
+    function closeQR() {
+      document.getElementById('qrModal').style.display = 'none';
+    }
+
+    function triggerSOS() {
+      if (confirm("112 긴급 전화를 연결하시겠습니까?")) {
+        window.location.href = "tel:112";
+      }
+    }
+  </script>
+</body>
+</html>
